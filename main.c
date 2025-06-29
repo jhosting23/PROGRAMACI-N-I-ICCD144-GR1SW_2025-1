@@ -1,36 +1,106 @@
+// main.c - Archivo principal del Sistema de Matriculación Vehicular
+// Creada por: Mathias, Jhostin, Christian
+// Fecha: 2025
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <locale.h> // Le dice al programa que use la configuracion local del sistema
+#include <locale.h>
 
-// Incluimos nuestras librerías
-#include "vehiculos.h"  // Contiene funciones para registrar y buscar vehículos
-#include "matricula.h"  // Contiene funciones para calcular la matrícula y sus tablas
+// Incluimos nuestras libreras
+#include "vehiculos.h"
+#include "matricula.h"
 
-// Constantes y funciones para el sistema de autenticación de usuarios
+// Constantes y definiciones
 #define ARCHIVO_USUARIOS "usuarios.txt"
-#define MAX_LINEA 100 // Usado para leer líneas del archivo de usuarios
+#define MAX_LINEA 100
 #define MAX_INTENTOS 3
 
-// FUNCIONES DEL SISTEMA DE AUTENTICACIÓN
-void limpiar_pantalla() {
-	system("cls");
+// Incluir las librerías necesarias para ocultar la contraseña.
+#ifdef _WIN32
+#include <conio.h> // Para getch() en Windows
+#else
+#include <termios.h> // Para configurar la terminal en Linux/macOS
+#include <unistd.h>  // Para STDIN_FILENO
+#endif
+
+// --- Prototipos de funciones definidas en este archivo ---
+void pausar();
+void obtener_contrasena_oculta(char* buffer, int tamano);
+int usuario_existe(const char* usuario);
+int registrar_usuario();
+int validar_credenciales(const char* usuario, const char* contrasena);
+int iniciar_sesion();
+void menu_vehiculos();
+void mostrar_tarifas_vigentes();
+
+
+// --- Funciones de Utilidad ---
+
+// Función multiplataforma para leer una contraseña y mostrar asteriscos.
+void obtener_contrasena_oculta(char* buffer, int tamano) {
+	int i = 0;
+	char c;
+	
+#ifdef _WIN32
+	// Método para Windows usando conio.h
+	while (i < tamano - 1) {
+		c = getch();
+		if (c == '\r' || c == '\n') { // Tecla Enter
+			break;
+		} else if (c == '\b') { // Tecla de retroceso (backspace)
+			if (i > 0) {
+				i--;
+				printf("\b \b"); // Mueve el cursor hacia atrás, escribe un espacio y vuelve atrás
+			}
+		} else {
+			buffer[i++] = c;
+			printf("*");
+		}
+	}
+#else
+	//  Linux/macOS usando termios.h
+	struct termios oldt, newt;
+	tcgetattr(STDIN_FILENO, &oldt); // Obtener configuración actual de la terminal
+	newt = oldt;
+	newt.c_lflag &= ~(ECHO | ICANON); // Desactivar eco y modo canónico
+	tcsetattr(STDIN_FILENO, TCSANOW, &newt); // Aplicar nueva configuración
+	
+	while (i < tamano - 1) {
+		c = getchar();
+		if (c == '\n') { // Tecla Enter
+			break;
+		} else if (c == 127) { // Tecla de retroceso (backspace)
+			if (i > 0) {
+				i--;
+				printf("\b \b");
+			}
+		} else {
+			buffer[i++] = c;
+			printf("*");
+		}
+	}
+	tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restaurar configuración original
+#endif
+	
+	buffer[i] = '\0'; // Terminar la cadena
+	printf("\n"); // Nueva línea después de presionar Enter
 }
 
 void pausar() {
 	printf("\nPresione Enter para continuar...");
-	while (getchar() != '\n' && getchar() != EOF);
-	getchar(); // Esperar la pulsación de Enter
+	getchar(); // Espera una pulsación de tecla
 }
+
+
+// --- Funciones de Autenticación ---
 
 int usuario_existe(const char* usuario) {
 	FILE* file = fopen(ARCHIVO_USUARIOS, "r");
-	if (!file) return 0; // Si el archivo no existe, no hay usuarios registrados
+	if (!file) return 0;
 	
 	char linea[MAX_LINEA];
 	while (fgets(linea, sizeof(linea), file)) {
 		char nombre_archivo[50];
-		// Lee hasta la primera coma o 49 caracteres para el nombre de usuario
 		sscanf(linea, "%49[^,]", nombre_archivo);
 		if (strcmp(nombre_archivo, usuario) == 0) {
 			fclose(file);
@@ -43,68 +113,72 @@ int usuario_existe(const char* usuario) {
 
 int registrar_usuario() {
 	char usuario[50], contrasena[50];
+	char buffer[100];
 	
 	limpiar_pantalla();
-	printf("=== Registro de Usuario ===\n");
+	printf("=== Registro de Nuevo Usuario ===\n");
+	
 	printf("Ingrese nombre de usuario: ");
-	scanf("%49s", usuario);
+	if (fgets(buffer, sizeof(buffer), stdin)) {
+		sscanf(buffer, "%49s", usuario);
+	}
 	
 	if (usuario_existe(usuario)) {
-		printf("Error: El usuario ya existe.\n");
+		printf("\nERROR: El usuario '%s' ya existe.\n", usuario);
 		pausar();
 		return 0;
 	}
 	
-	printf("Ingrese contraseña: ");
-	scanf("%49s", contrasena);
+	printf("Ingrese contrasena: ");
+	obtener_contrasena_oculta(contrasena, 50);
 	
 	FILE* file = fopen(ARCHIVO_USUARIOS, "a");
 	if (!file) {
-		perror("No se pudo abrir el archivo de usuarios"); // Imprime el error del sistema
+		perror("No se pudo abrir el archivo de usuarios");
 		pausar();
 		return 0;
 	}
 	
 	fprintf(file, "%s,%s\n", usuario, contrasena);
 	fclose(file);
-	printf("Usuario registrado con exito.\n");
+	printf("\nUsuario registrado con exito.\n");
 	pausar();
 	return 1;
 }
 
 int validar_credenciales(const char* usuario, const char* contrasena) {
 	FILE* file = fopen(ARCHIVO_USUARIOS, "r");
-	if (!file) {
-		perror("No se pudo abrir el archivo de usuarios");
-		return 0;
-	}
+	if (!file) return 0;
 	
 	char linea[MAX_LINEA];
 	while (fgets(linea, sizeof(linea), file)) {
-		char usuar_Tamano[50], contra_Tamano[50];
-		sscanf(linea, "%49[^,],%49[^\n]", usuar_Tamano, contra_Tamano);
-		if (strcmp(usuar_Tamano, usuario) == 0 && strcmp(contra_Tamano, contrasena) == 0) {
+		char usuar_tamano[50], contra_tamano[50];
+		// Asegurarse de quitar el \n de la contraseña leída del archivo
+		sscanf(linea, "%49[^,],%49[^\n]", usuar_tamano, contra_tamano);
+		if (strcmp(usuar_tamano, usuario) == 0 && strcmp(contra_tamano, contrasena) == 0) {
 			fclose(file);
 			return 1;
 		}
 	}
-	
 	fclose(file);
 	return 0;
 }
 
 int iniciar_sesion() {
 	char usuario[50], contrasena[50];
+	char buffer[100];
 	int intentos = 0;
 	
-	limpiar_pantalla();
-	printf("=== Inicio de Sesion ===\n");
-	
 	while (intentos < MAX_INTENTOS) {
+		limpiar_pantalla();
+		printf("=== Inicio de Sesion ===\n");
 		printf("Usuario: ");
-		scanf("%49s", usuario);
+		if (fgets(buffer, sizeof(buffer), stdin)) {
+			sscanf(buffer, "%49s", usuario);
+		}
+		
 		printf("Contrasena: ");
-		scanf("%49s", contrasena);
+		obtener_contrasena_oculta(contrasena, 50);
 		
 		if (validar_credenciales(usuario, contrasena)) {
 			limpiar_pantalla();
@@ -118,158 +192,117 @@ int iniciar_sesion() {
 			pausar();
 			return 1;
 		} else {
-			printf("Credenciales incorrectas. Intento %d de %d.\n", ++intentos, MAX_INTENTOS);
-			if (intentos < MAX_INTENTOS) {
-				printf("Intente nuevamente:\n");
-			}
+			printf("\nCredenciales incorrectas. Intento %d de %d.\n", ++intentos, MAX_INTENTOS);
+			pausar();
 		}
 	}
 	
-	printf("Demasiados intentos fallidos. Intente mas tarde.\n");
+	printf("\nDemasiados intentos fallidos. El programa se cerrara.\n");
 	pausar();
 	return 0;
 }
 
-// MENÚ DEL SISTEMA DE VEHÍCULOS CON CÁLCULO DE MATRÍCULA INTEGRADO
+
+// --- Menús del Sistema ---
+
 void menu_vehiculos() {
 	int opcion;
+	char buffer[10];
 	
 	do {
 		limpiar_pantalla();
-		printf("=== SISTEMA DE MATRICULACION VEHICULAR ===\n");
+		printf("=== MENU PRINCIPAL ===\n");
 		printf("1. Registrar nuevo vehiculo\n");
 		printf("2. Buscar vehiculo por placa\n");
 		printf("3. Calcular matricula vehicular\n");
 		printf("4. Mostrar tarifas vigentes\n");
-		printf("0. Volver al menu principal\n");
+		printf("0. Cerrar Sesion y Volver al Menu de Inicio\n");
+		printf("--------------------------------------------\n");
 		printf("Seleccione una opcion: ");
-		scanf("%d", &opcion);
+		
+		if (fgets(buffer, sizeof(buffer), stdin)) {
+			if (sscanf(buffer, "%d", &opcion) != 1) opcion = -1; // Opción inválida si no es número
+		} else {
+			opcion = -1;
+		}
+		
 		switch (opcion) {
-		case 1:
-			limpiar_pantalla();
-			registrar_vehiculo();  // Función de la librería vehiculos.h
-			pausar();
-			break;
-			
-		case 2:
-			limpiar_pantalla();
-			buscar_vehiculo();  // Función de la librería vehiculos.h
-			pausar();
-			break;
-			
-		case 3:
-			limpiar_pantalla();
-			menu_calculo_matricula();  // Función de la librería matricula.h
-			pausar();
-			break;
-			
-		case 4:
-			limpiar_pantalla();
-			mostrar_tarifas_vigentes(); // Función local en main.c
-			pausar();
-			break;
-			
-		case 0:
-			printf("Volviendo al menu principal...\n");
-			break;
-			
-		default:
-			printf("Opcion invalida.\n");
-			pausar();
+		case 1: registrar_vehiculo(); break;
+		case 2: buscar_vehiculo(); pausar(); break;
+		case 3: menu_calculo_matricula(); pausar(); break;
+		case 4: mostrar_tarifas_vigentes(); pausar(); break;
+		case 0: printf("\nCerrando sesion...\n"); break;
+		default: printf("\nOpcion invalida. Intente de nuevo.\n"); pausar();
 		}
 	} while (opcion != 0);
 }
 
-// FUNCIÓN PARA MOSTRAR LAS TARIFAS VIGENTES
 void mostrar_tarifas_vigentes() {
-	
+	limpiar_pantalla();
 	printf("=== TARIFAS VIGENTES PARA MATRICULACION %d ===\n", ANO_FISCAL);
 	printf("==============================================\n\n");
-	
 	printf("TASAS ANT (Agencia Nacional de Transito):\n");
-	printf("• Vehiculos Particulares:      $%.2f\n", TASA_ANT_PARTICULAR);
-	printf("• Vehiculos Comerciales:       $%.2f\n", TASA_ANT_COMERCIAL);
-	printf("• Motocicletas:                $%.2f\n", TASA_ANT_MOTOCICLETA);
+	printf(" Vehiculos Particulares:      $%.2f\n", TASA_ANT_PARTICULAR);
+	printf(" Vehiculos Comerciales:       $%.2f\n", TASA_ANT_COMERCIAL);
+	printf(" Motocicletas:                $%.2f\n", TASA_ANT_MOTOCICLETA);
 	printf("\n");
-	
 	printf("TASAS PREFECTURA DE PICHINCHA:\n");
-	printf("• Vehiculos Particulares:      $%.2f\n", TASA_PREFECTURA_PARTICULAR);
-	printf("• Vehiculos Comerciales:       $%.2f\n", TASA_PREFECTURA_COMERCIAL);
-	printf("• Motocicletas:                $%.2f\n", TASA_PREFECTURA_MOTOCICLETA);
+	printf(" Vehiculos Particulares:      $%.2f\n", TASA_PREFECTURA_PARTICULAR);
+	printf(" Vehiculos Comerciales:       $%.2f\n", TASA_PREFECTURA_COMERCIAL);
+	printf(" Motocicletas:                $%.2f\n", TASA_PREFECTURA_MOTOCICLETA);
 	printf("\n");
-	
 	printf("REVISION TECNICA VEHICULAR (RTV):\n");
-	printf("• Vehiculos Livianos:          $%.2f\n", VALOR_RTV_LIVIANO);
-	printf("• Vehiculos Pesados:           $%.2f\n", VALOR_RTV_PESADO);
-	printf("• Motocicletas:                $%.2f\n", VALOR_RTV_MOTOCICLETA);
+	printf(" Vehiculos Livianos:          $%.2f\n", VALOR_RTV_LIVIANO);
+	printf(" Vehiculos Pesados:           $%.2f\n", VALOR_RTV_PESADO);
+	printf(" Motocicletas:                $%.2f\n", VALOR_RTV_MOTOCICLETA);
 	printf("\n");
-	
-	printf("TASAS SPPAT (Sistema de Pagos):\n");
-	printf("• Motos hasta 200cc:           $%.2f\n", SPPAT_MOTO_HASTA_200);
-	printf("• Motos mas de 200cc:          $%.2f\n", SPPAT_MOTO_MAS_200);
-	printf("• Livianos hasta 1500cc:       $%.2f\n", SPPAT_LIVIANO_HASTA_1500);
-	printf("• Livianos 1501-2500cc:        $%.2f\n", SPPAT_LIVIANO_1501_2500);
-	printf("• Livianos mas de 2500cc:      $%.2f\n", SPPAT_LIVIANO_MAS_2500);
-	printf("• Vehiculos Pesados:           $%.2f\n", SPPAT_PESADO);
-	printf("• Vehiculos Comerciales:       $%.2f\n", SPPAT_COMERCIAL);
-	printf("\n");
-	
 	printf("OTROS VALORES:\n");
-	printf("• Adhesivo (Sticker):          $%.2f\n", VALOR_ADHESIVO);
-	printf("• Recargo anual por mora:      %.1f%%\n", RECARGO_ANUAL_PORCENTAJE);
-	printf("\n");
-	
-	printf("IMPUESTOS (Calculados segun avaluo):\n");
-	printf("• Impuesto a la Propiedad (SRI)\n");
-	printf("• Impuesto al Rodaje (AMT-Quito)\n");
-	printf("  - Ambos varian segun el avaluo del vehiculo\n");
-	printf("  - Use la opcion 'Calcular matricula' para detalles\n");
+	printf(" Adhesivo (Sticker):          $%.2f\n", VALOR_ADHESIVO);
+	printf(" Recargo anual por mora:      %.1f%%\n", RECARGO_ANUAL_PORCENTAJE);
 	printf("\n");
 }
 
-// FUNCIÓN MAIN PRINCIPAL
+// --- Función Principal de Ejecución ---
 int main() {
-	setlocale(LC_ALL, ""); // Configura la localización para manejo de caracteres especiales
+	setlocale(LC_ALL, ""); // Para caracteres especiales como tildes
 	int opcion;
-	
-	printf("=== SISTEMA DE MATRICULACION VEHICULAR ===\n");
-	printf("=========================================\n");
-	printf("        Version %d - Ecuador\n", ANO_FISCAL);
-	printf("=========================================\n\n");
+	char buffer[10];
 	
 	do {
 		limpiar_pantalla();
-		printf("=== Sistema de Matriculacion Vehicular ===\n");
-		printf("1. Registrar nuevo usuario\n");
-		printf("2. Iniciar sesion\n");
-		printf("0. Salir\n");
+		printf("=========================================\n");
+		printf("   SISTEMA DE MATRICULACION VEHICULAR\n");
+		printf("              %d\n", ANO_FISCAL);
+		printf("=========================================\n\n");
+		printf("1. Iniciar sesion\n");
+		printf("2. Registrar nuevo usuario\n");
+		printf("0. Salir del programa\n");
+		printf("-----------------------------------------\n");
 		printf("Seleccione una opcion: ");
-		scanf("%d", &opcion);
-		while (getchar() != '\n'); // O puedes llamar a limpiar_entrada() 
+		
+		if (fgets(buffer, sizeof(buffer), stdin)) {
+			if (sscanf(buffer, "%d", &opcion) != 1) opcion = -1;
+		} else {
+			opcion = -1;
+		}
 		
 		switch (opcion) {
 		case 1:
-			registrar_usuario();
-			break;
-			
-		case 2:
 			if (iniciar_sesion()) {
-				// Si el inicio de sesión es exitoso, entra al menú de vehículos
 				menu_vehiculos();
 			}
 			break;
-			
+		case 2:
+			registrar_usuario();
+			break;
 		case 0:
 			limpiar_pantalla();
 			printf("=== GRACIAS POR USAR EL SISTEMA ===\n");
-			printf("Sistema de Matriculacion Vehicular %d\n", ANO_FISCAL);
 			printf("Desarrollado por: Mathias, Jhostin, Christian\n");
-			printf("¡Hasta luego!\n");
-			printf("==================================\n");
+			printf("Hasta luego!\n");
 			break;
-			
 		default:
-			printf("Opcion invalida.\n");
+			printf("\nOpcion invalida. Intente de nuevo.\n");
 			pausar();
 		}
 	} while (opcion != 0);
